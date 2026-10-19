@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LightUp 光引 · 无障碍美妆助手</title>
+<meta name="description" content="把口红色号翻译成声音与语言。面向视障人群的无障碍美妆助手。" />
+<link rel="stylesheet" href="./styles.css" />
+<style>
+  /* 直接双击打开（file://）时给出的引导页，避免白屏 */
+  .filemode {
+    max-width: 640px; margin: 14vh auto; padding: 40px;
+    border: 1px solid #232329; border-radius: 16px;
+    background: radial-gradient(circle at 50% 0%, #17171b, #0a0a0c 70%);
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: #ececee; line-height: 1.8;
+  }
+  .filemode h1 { font-size: 1.3rem; color: #e8cf7a; margin-bottom: 14px; letter-spacing: .06em; }
+  .filemode p { font-size: .92rem; color: #9a9aa3; margin-bottom: 10px; }
+  .filemode .how { color: #ececee; font-size: 1rem; margin-top: 18px; }
+  .filemode .how b { color: #c9a227; }
+  .filemode code { background: #16161a; padding: 2px 6px; border-radius: 4px; color: #e8cf7a; font-size: .86rem; }
+</style>
+<script>
+  /* 尽早判断协议：file:// 时直接把页面换成引导说明，而不是白屏 */
+  if (location.protocol === 'file:') {
+    document.addEventListener('DOMContentLoaded', function () {
+      document.title = '请通过本地服务器打开 · LightUp 光引';
+      document.body.innerHTML =
+        '<div class="filemode">' +
+        '<h1>这个页面需要本地服务器才能运行</h1>' +
+        '<p>直接双击打开时，浏览器出于安全限制不允许加载 WASM 与人脸模型，所以会是一片空白。</p>' +
+        '<p class="how">正确做法：双击本文件夹里的 <b>启动Demo.bat</b></p>' +
+        '<p>或在命令行执行 <code>node serve.mjs</code>，然后访问 <code>http://127.0.0.1:8765</code></p>' +
+        '</div>';
+    });
+  }
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='16' fill='%230a0a0b'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23C9A227' stroke-width='2'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ================= 顶栏 ================= -->
+<header class="topbar">
+  <div class="brand">
+    <div class="mark" aria-hidden="true">LU</div>
+    <div class="brand-text">
+      <h1>LIGHTUP <span>光引</span></h1>
+      <p>让颜色被听见 · 无障碍美妆助手</p>
+    </div>
+  </div>
+
+  <div class="audio-ctl" role="group" aria-label="播报设置">
+    <span class="audio-label">播报</span>
+    <button class="chip-btn" id="btnMute" aria-pressed="true" title="播报总开关：旋律、语音、提示音（快捷键 M）">
+      <span class="dot-sm"></span>开
+    </button>
+    <span class="audio-divider" aria-hidden="true"></span>
+    <button class="chip-btn" id="btnRate" title="语速（快捷键 T）">语速 1.0×</button>
+    <button class="chip-btn" id="btnVoice" title="切换男声 / 女声（快捷键 Y）">音色 女声</button>
+  </div>
+
+  <div class="topbar-actions">
+    <button class="chip-btn" id="btnBigText" aria-pressed="false" title="放大全部文字（快捷键 B）">
+      <span class="dot-sm"></span>大字
+    </button>
+    <button class="chip-btn" id="btnHighContrast" aria-pressed="false" title="高对比模式（快捷键 C）">
+      <span class="dot-sm"></span>高对比
+    </button>
+  </div>
+</header>
+
+<!-- ================= 主体 ================= -->
+<main class="layout">
+
+  <!-- 左：取景器 -->
+  <section class="stage-col">
+  <section class="stage" aria-label="取景器">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="photo" class="stage-media" alt="当前图片" hidden />
+    <canvas id="overlay" aria-hidden="true"></canvas>
+
+    <div class="reticle" id="reticle" aria-hidden="true">
+      <div class="reticle-ring"></div>
+      <div class="reticle-cross"></div>
+    </div>
+
+    <div class="stage-top">
+      <span class="live-pill" id="enginePill">初始化中</span>
+      <span class="swatch" id="swatch" aria-hidden="true"></span>
+    </div>
+
+    <!-- 放大镜：显示取样区域，可在里面拖动微调 -->
+    <div class="loupe-wrap" id="loupeWrap" hidden>
+      <canvas id="loupe" class="loupe" width="320" height="320" aria-hidden="true"></canvas>
+      <div class="loupe-bar">
+        <span id="loupeLabel">取样半径 0 px</span>
+        <span class="loupe-tip">滚轮缩放 · 放大图内拖动微调</span>
+      </div>
+    </div>
+
+    <div class="stage-bottom">
+      <p class="stage-hint" id="stageHint">正在启动…</p>
+    </div>
+
+    <!-- 白平衡校准引导 -->
+    <div class="calib-banner" id="calibBanner" hidden>
+      <b>校准中</b> 在当前画面里点一下白纸/白墙即可，<u>不需要换图或上传第二张</u> · 再点「白平衡」取消
+    </div>
+
+    <!-- 未选择画面来源时的引导 -->
+    <div class="chooser" id="chooser" hidden>
+      <h2>选择画面来源</h2>
+      <p>先用示例照片看看效果；想看你自己，再开摄像头或上传图片。也可以直接把图片拖进这个框。</p>
+      <div class="chooser-actions">
+        <button class="chooser-btn primary" id="chExample">用示例照片</button>
+        <button class="chooser-btn" id="chCamera">开启摄像头</button>
+        <button class="chooser-btn" id="chUpload">上传图片</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 画面来源切换条 -->
+  <div class="source-bar">
+    <span class="src-label">画面来源</span>
+    <button class="src-btn" id="srcExample">示例照片</button>
+    <button class="src-btn" id="srcCamera">摄像头</button>
+    <button class="src-btn" id="srcUpload">上传图片</button>
+    <button class="src-btn" id="btnCalib" title="用一张白纸做白平衡校准，可显著提高取色准确度">白平衡</button>
+    <span class="src-name" id="srcName"></span>
+  </div>
+  </section>
+
+  <input type="file" id="fileInput" accept="image/*" hidden />
+
+  <!-- 右：控制与结果 -->
+  <aside class="panel">
+
+    <nav class="modes" role="tablist" aria-label="工作模式">
+      <button role="tab" class="mode" id="modeObject" aria-selected="true" tabindex="0">
+        <b>读色</b><small>口红 / 物体</small>
+      </button>
+      <button role="tab" class="mode" id="modeSkin" aria-selected="false" tabindex="-1">
+        <b>诊肤色</b><small>冷暖 · ITA°</small>
+      </button>
+      <button role="tab" class="mode" id="modeCheck" aria-selected="false" tabindex="-1">
+        <b>查妆容</b><small>比对目标色</small>
+      </button>
+    </nav>
+
+    <button class="primary-btn" id="btnRead">
+      <span id="btnReadLabel">读一读这个颜色</span>
+      <kbd>空格</kbd>
+    </button>
+
+    <div class="result" id="result" role="status" aria-live="polite">
+      <div class="result-placeholder">
+        <p>把口红举到镜头前，按空格。</p>
+        <p class="dim">我会告诉你它叫什么、适合谁，以及一段只属于它的旋律。</p>
+      </div>
+    </div>
+
+    <div class="panel-foot">
+      <button class="ghost-btn" id="btnReplay" disabled>再听一次 <kbd>R</kbd></button>
+      <button class="ghost-btn" id="btnRemember" hidden>记住这个色号</button>
+      <button class="ghost-btn" id="btnGoRead" hidden>去「读色」设目标 →</button>
+      <button class="ghost-btn" id="btnTryon" disabled>试色</button>
+      <button class="ghost-btn" id="btnLibrary">色卡库</button>
+      <button class="ghost-btn" id="btnQA">问一问</button>
+      <button class="ghost-btn" id="btnHelp" aria-expanded="false">声音怎么听？</button>
+    </div>
+
+    <div class="qa" id="qaPanel" hidden>
+      <h3>问一问</h3>
+      <div class="qa-chips">
+        <button class="qa-chip" data-q="fit">这个色适合我吗？</button>
+        <button class="qa-chip" data-q="dupe">有几乎一样的替代色吗？</button>
+        <button class="qa-chip" data-q="check">我涂得对不对？</button>
+        <button class="qa-chip" data-q="accurate">怎么才能读得更准？</button>
+      </div>
+      <p class="qa-answer" id="qaAnswer">选一个问题，我会直接回答你。</p>
+    </div>
+
+    <div class="legend" id="legend" hidden>
+      <h3>声化规则</h3>
+      <ul>
+        <li><b>色相</b> → 五声音阶两个八度（10 个音位）</li>
+        <li><b>冷暖</b> → 大三和弦（暖） / 小三和弦（冷）</li>
+        <li><b>明度</b> → 音量与八度</li>
+        <li><b>饱和度</b> → 音色亮度（正弦 → 三角 → 锯齿）</li>
+      </ul>
+      <p class="dim">同一色系听感相同，换一支口红若能听出"同一段旋律"，说明它们属于同一色系。</p>
+    </div>
+  </aside>
+</main>
+
+<!-- ================= 字幕带（无障碍：语音内容的文字镜像） ================= -->
+<footer class="subtitle-bar">
+  <span class="kbd-hint">1 / 2 / 3 切模式</span>
+  <span class="sep">·</span>
+  <span class="kbd-hint">L 色卡库</span>
+  <span class="sep">·</span>
+  <span class="kbd-hint">M 播报</span>
+  <span class="sep">·</span>
+  <span class="kbd-hint">Y 音色</span>
+  <span class="sep">·</span>
+  <p class="subtitle" id="subtitle">准备就绪</p>
+</footer>
+
+<!-- 色卡库 -->
+<div class="lib" id="lib" hidden role="dialog" aria-modal="true" aria-labelledby="libTitle">
+  <div class="lib-panel">
+    <header class="lib-head">
+      <div>
+        <h4 id="libTitle">色卡库</h4>
+        <p id="libCount" class="lib-sub">点任意色号，听它的旋律</p>
+      </div>
+      <div class="lib-filters" role="group" aria-label="筛选">
+        <button class="src-btn" data-f="all" aria-pressed="true">全部</button>
+        <button class="src-btn" data-f="warm" aria-pressed="false">暖调</button>
+        <button class="src-btn" data-f="cool" aria-pressed="false">冷调</button>
+        <button class="src-btn" data-f="neutral" aria-pressed="false">中性</button>
+        <button class="src-btn" data-f="me" aria-pressed="false" id="libMeFilter">适合我</button>
+      </div>
+      <button class="ghost-btn lib-close" id="libClose">关闭 <kbd>Esc</kbd></button>
+    </header>
+
+    <div class="lib-grid" id="libGrid" role="listbox" aria-label="色号列表"></div>
+
+    <footer class="lib-foot">
+      <span class="lib-sel" id="libSel">未选择色号</span>
+      <button class="ghost-btn" id="libPlay" disabled>再听一次 <kbd>R</kbd></button>
+      <button class="ghost-btn" id="libTarget" disabled>设为验妆目标</button>
+    </footer>
+  </div>
+</div>
+
+<!-- 指标说明弹层 -->
+<div class="tip" id="tip" hidden role="dialog" aria-modal="true" aria-labelledby="tipTitle" aria-describedby="tipText">
+  <div class="tip-card">
+    <h4 id="tipTitle">说明</h4>
+    <p id="tipText"></p>
+    <button class="ghost-btn" id="tipClose">知道了</button>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

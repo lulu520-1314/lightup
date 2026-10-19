@@ -1,0 +1,22 @@
+# 依赖
+node_modules/
+package-lock.json.bak
+
+# 本地调试产物
+app/_dev/shots/
+app/_dev/*.mjs.tmp
+*.log
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# 生成的临时文件
+app/_dev/_*.mjs
+app/_dev/_*.py
+deck/render*/
+deck/render2/
+deck/_build_tmp.pptx
