@@ -202,7 +202,7 @@ Windows 用户也可以直接双击 `app/启动Demo.bat`（自动装依赖、起
 │  ├─ vendor/             本地化的模型与 WASM（16.9 MB）
 │  ├─ assets/             示例人像
 │  └─ _dev/               自检、评估脚本（截图不入库）
-├─ deck/                  初赛提案 PPT（基于赛事官方模版）、生成脚本、演示视频脚本
+├─ deck/                  初赛提案 PPT（17 页，基于赛事官方模版）、生成脚本、演示视频脚本
 ├─ docs/screenshots/      README 用截图
 └─ README.md
 ```

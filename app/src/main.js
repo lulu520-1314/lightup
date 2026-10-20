@@ -806,7 +806,13 @@ async function detectCurrentImage() {
     drawOverlay(null, w, h);
   }
   drawLoupe();
-  if (state.mode === 'object') readNow();
+  if (state.mode === 'object') {
+    // 模型就绪后把“加载中”的提示还原成取色提示
+    els.hint.textContent = window.matchMedia('(pointer: coarse)').matches
+      ? '点一下画面取色；双指缩放取样大小'
+      : '点击画面取色；滚轮调取样大小，放大图内可微调';
+    readNow();
+  }
 }
 
 function useExample() {
