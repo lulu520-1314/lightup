@@ -874,3 +874,12 @@ button:focus-visible {
   .subtitle-bar { padding: 7px 24px 9px; }
   .replay-btn { padding: 6px 11px; }
 }
+
+/* 「适合我」在没测肤色前是禁用态：仍然可点，点了给出说明 */
+.lib-filters .src-btn.is-off {
+  opacity: .45;
+  border-style: dashed;
+}
+.lib-filters .src-btn.is-off:hover {
+  opacity: .6;
+}

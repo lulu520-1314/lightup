@@ -68,6 +68,7 @@ const els = {
   btnLibrary: $('btnLibrary'),
   lib: $('lib'),
   libGrid: $('libGrid'),
+  libMe: $('libMeFilter'),
   libCount: $('libCount'),
   libClose: $('libClose'),
   libSel: $('libSel'),
@@ -727,6 +728,7 @@ function clearObjectUrl() {
 /** 载入一张图片作为画面来源 */
 async function loadImageSource(url, label) {
   stopCamera();
+  resetPerSource();
   // 从别的来源切过来时，旧的白参考不再成立，必须重置
   if (state.source.kind !== 'none') clearWhitePoint({ announce: false });
   setSourceUI('image', label);
@@ -776,6 +778,20 @@ async function loadImageSource(url, label) {
     setSubtitle('人脸模型加载中。读色现在就能用：点一下画面上的口红即可。');
   }
   return true;
+}
+
+/** 换画面来源时，清掉上一张图的肤色/目标色，避免串图 */
+function resetPerSource() {
+  state.skinProfile = null;
+  state.targetShade = null;
+  state.lastGeometry = null;
+  if (libFilter === 'me') libFilter = 'all';
+  const meBtn = els.libMe;
+  if (meBtn) {
+    meBtn.classList.add('is-off');
+    meBtn.setAttribute('aria-disabled', 'true');
+    meBtn.title = '先到「诊肤色」测一次，这里才知道哪几支适合你';
+  }
 }
 
 /** 对当前图片跑一次人脸检测（模型就绪后调用） */
@@ -891,7 +907,12 @@ function finish(res) {
   els.remember.hidden = res.kind !== 'object' || res.isShade === false;
   els.goRead.hidden = !(res.kind === 'check' && res.needsTarget);
   if (res.kind === 'skin') {
-    state.skinProfile = { tone: res.tone.key, band: res.band.label, ita: res.ita };
+    state.skinProfile = {
+    tone: res.tone.key,
+    band: res.band.label,
+    ita: res.ita,
+    recs: (res.recommend || []).map((x) => x.hex),
+  };
   }
   earcon('detect');
   drawLoupe();
@@ -1053,7 +1074,7 @@ function setMode(mode, fromInit = false) {
   els.result.innerHTML = `<div class="result-placeholder">
       <p>${MODE_META[mode].hint}。</p>
       <p class="dim">${mode === 'check'
-        ? '先在「读色」里记住一支口红的色号，再来比对实际唇色。'
+        ? '先在「读色」里读到一支色号，或在「色卡库」点「设为验妆目标」，再来比对实际唇色。'
         : '所有计算在本机完成，画面不会上传。'}</p>
     </div>`;
   setSubtitle(MODE_META[mode].hint);
@@ -1223,6 +1244,15 @@ let libTrigger = null;
 function fitsMe(shade) {
   const sp = state.skinProfile;
   if (!sp) return null;
+  const [r, g, b] = hexToRgb(shade.hex);
+  const lab = rgb2lab(r, g, b);
+  if (sp.recs && sp.recs.length) {
+    // 与“诊肤色”给出的推荐色足够接近，才算适合：避免整库都标“适合你”
+    return sp.recs.some((hex) => {
+      const [rr, gg, bb] = hexToRgb(hex);
+      return deltaE2000(lab, rgb2lab(rr, gg, bb)) <= 10;
+    });
+  }
   return shade.tone === sp.tone || shade.tone === 'neutral' || sp.tone === 'neutral';
 }
 
@@ -1233,9 +1263,19 @@ function renderLibrary() {
     return s.tone === libFilter;
   });
 
+  const meBtn = els.libMe;
+  if (meBtn) {
+    const hasSkin = !!state.skinProfile;
+    meBtn.classList.toggle('is-off', !hasSkin);
+    meBtn.setAttribute('aria-disabled', String(!hasSkin));
+    meBtn.title = hasSkin
+      ? '只看适合你肤色的色号'
+      : '先到「诊肤色」测一次，这里才知道哪几支适合你';
+  }
+
   if (libFilter === 'me' && !state.skinProfile) {
     els.libCount.textContent = '还没有测过肤色';
-    els.libGrid.innerHTML = '<p class="lib-empty">先到「诊肤色」测一次，这里就只列出适合你的色号。</p>';
+    els.libGrid.innerHTML = '<p class="lib-empty">还没有测肤色。切到「诊肤色」测一次，这里才会列出真正适合你的色号。</p>';
     return;
   }
   els.libCount.textContent = `${list.length} 支 · 方向键浏览，选中即试听`;
