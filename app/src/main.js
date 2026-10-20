@@ -763,12 +763,28 @@ async function loadImageSource(url, label) {
     : '点击画面取色；滚轮调取样大小，放大图内可微调';
 
   // 再尝试人脸检测；模型不可用时仍然保留读色能力
+  // 模型就绪时立即检测；没就绪就先用读色模式，模型加载完再补检测
+  if (state.engine.ready) {
+    await detectCurrentImage();
+  } else {
+    els.pill.textContent = '正在后台加载人脸模型…';
+    els.pill.classList.remove('ok');
+    if (state.mode === 'object') readNow();
+  }
+  return true;
+}
+
+/** 对当前图片跑一次人脸检测（模型就绪后调用） */
+async function detectCurrentImage() {
+  if (state.source.kind !== 'image' || !photo.naturalWidth) return;
+  const w = photo.naturalWidth;
+  const h = photo.naturalHeight;
+
   const imageModeReady = await state.engine.setImageMode();
   if (!imageModeReady) {
     els.pill.textContent = '仅读色（人脸模型未就绪）';
     els.pill.classList.remove('ok');
-    if (state.mode === 'object') readNow();
-    return true;
+    return;
   }
 
   const res = state.engine.detectImage(photo);
@@ -785,10 +801,8 @@ async function loadImageSource(url, label) {
     els.pill.classList.remove('ok');
     drawOverlay(null, w, h);
   }
-
   drawLoupe();
   if (state.mode === 'object') readNow();
-  return true;
 }
 
 function useExample() {
@@ -1755,11 +1769,15 @@ async function boot() {
       els.hint.textContent = '没有摄像头权限，可以上传图片或使用示例照片';
     }
   } else {
-    await engineInit;
-    const ok = await useExample();      // 默认来源：示例照片
+    // 先显示示例照片（55 KB），模型在后台下载，避免慢网络下白屏
+    const ok = await useExample();
     if (!ok) {
       setSourceUI('none', '');
       els.chooser.hidden = false;
+    }
+    await engineInit;
+    if (state.source.kind === 'image' && !state.lastGeometry) {
+      await detectCurrentImage();
     }
   }
 

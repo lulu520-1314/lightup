@@ -40,8 +40,29 @@ async function run(blockModel) {
   return st;
 }
 
+async function slowModel() {
+  const page = await browser.newPage();
+  await page.setRequestInterception(true);
+  page.on('request', async (req) => {
+    if (req.url().includes('face_landmarker.task') || req.url().includes('vision_wasm')) {
+      await new Promise((r) => setTimeout(r, 6000));
+      req.continue().catch(() => {});
+    } else req.continue();
+  });
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await sleep(2500);                       // 模型还在下载时观察
+  const early = await page.evaluate(() => ({
+    photoVisible: !document.getElementById('photo')?.hidden && document.getElementById('photo').naturalWidth > 0,
+    hasGeometry: !!window.__lightup?.getState?.().lastGeometry,
+    chooserHidden: document.getElementById('chooser')?.hidden,
+  }));
+  await page.close();
+  return early;
+}
+
 const normal = await run(false);
 const degraded = await run(true);
+const early = await slowModel();
 await browser.close();
 
 const report = {
@@ -51,8 +72,10 @@ const report = {
   '降级：不退回选择来源': degraded.chooserHidden === true,
   '降级：取色器仍在': degraded.loupeVisible === true,
   '降级：仍能给出读色结果': /红|色/.test(degraded.result),
+  '慢网络：模型下载中就显示图片': early.photoVisible === true,
+  '慢网络：不退回选择来源': early.chooserHidden === true,
 };
-console.log(JSON.stringify({ report, normal, degraded }, null, 2));
+console.log(JSON.stringify({ report, normal, degraded, early }, null, 2));
 const failed = Object.entries(report).filter(([, v]) => !v).map(([k]) => k);
 console.log(failed.length ? '未通过: ' + failed.join(', ') : '降级检查通过');
 process.exit(failed.length ? 1 : 0);
