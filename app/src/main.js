@@ -756,7 +756,8 @@ async function loadImageSource(url, label) {
 
   // 先把图显示出来：这一步与"人脸模型是否就绪"无关
   state.lastGeometry = null;
-  state.pick = { x: 0.5, y: 0.5 };
+  // 内置示例图的唇部位置是已知的，模型没就绪时也先落在正确位置
+  state.pick = label === '示例照片' ? { x: 0.505, y: 0.677 } : { x: 0.5, y: 0.5 };
   drawOverlay(null, w, h);
   drawLoupe();
   els.hint.textContent = window.matchMedia('(pointer: coarse)').matches
@@ -768,11 +769,11 @@ async function loadImageSource(url, label) {
   if (state.engine.ready) {
     await detectCurrentImage();
   } else {
-    // 模型还在下载：先别急着读中心点（那里可能是鼻子），等模型就绪再定位嘴唇
+    // 模型还在下载：读色不依赖它，先按已知位置读一次
     els.pill.textContent = '正在后台加载人脸模型…';
     els.pill.classList.remove('ok');
-    setSubtitle('人脸模型加载中，完成后会自动识别人脸；现在也可以直接点画面取色。');
-    els.hint.textContent = '模型加载中… 可直接点击画面取色';
+    els.hint.textContent = '模型加载中… 点一下画面即可取色（人脸功能稍后可用）';
+    setSubtitle('人脸模型加载中。读色现在就能用：点一下画面上的口红即可。');
   }
   return true;
 }
