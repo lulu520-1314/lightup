@@ -699,6 +699,7 @@ async function useCamera() {
     state.stream = stream;
     video.srcObject = stream;
     await video.play();
+    ensureEngine();
     await state.engine.setVideoMode();
     setSourceUI('camera', '摄像头');
     els.pill.textContent = '摄像头已就绪';
@@ -925,6 +926,12 @@ function readNow() {
     return finish(analyzeObject(withSmoothing(robust.lab)));
   }
 
+  if (!state.engine.ready) {
+    ensureEngine();
+    earcon('error');
+    return announceAndShow('人脸模型还在加载（约 16 MB，首次较慢），稍等一下再按空格。');
+  }
+
   const geo = state.lastGeometry;
   if (!geo) {
     earcon('error');
@@ -1020,6 +1027,8 @@ function setMode(mode, fromInit = false) {
   if (!fromInit) speakUI(`${MODE_META[mode].name}模式。`);
   els.remember.hidden = true;
   els.goRead.hidden = true;
+
+  if (mode === 'skin' || mode === 'check' || mode === 'tryon') ensureEngine();
 
   const src = sourceInfo();
   if (src) drawOverlay(state.lastGeometry, src.w, src.h);
@@ -1709,6 +1718,40 @@ window.__lightup = {
   }),
 };
 
+let enginePromise = null;
+
+/** 首次需要人脸能力时才加载模型（约 16 MB），之后复用 */
+function ensureEngine() {
+  if (!enginePromise) enginePromise = initEngineOnce();
+  return enginePromise;
+}
+
+async function initEngineOnce() {
+  if (state.engine.ready) return true;
+  els.pill.textContent = '正在加载人脸模型…';
+  try {
+    const ok = await state.engine.init((msg) => {
+      els.pill.textContent = msg;
+      setSubtitle(msg);
+    });
+    if (ok) {
+      els.pill.textContent = `视觉引擎就绪 · ${state.engine.delegate}`;
+      els.pill.classList.add('ok');
+      if (state.source.kind === 'image' && !state.lastGeometry) {
+        await detectCurrentImage();
+      }
+      return true;
+    }
+    els.pill.textContent = '视觉引擎不可用（仅读色）';
+    setSubtitle('人脸模型加载失败，读色功能仍可使用。');
+    return false;
+  } catch (err) {
+    console.error(err);
+    els.pill.textContent = '视觉引擎不可用（仅读色）';
+    return false;
+  }
+}
+
 async function boot() {
   resizeOverlay();
   setMode('object');
@@ -1744,42 +1787,20 @@ async function boot() {
   } catch (_) { /* ignore */ }
   updateCalibUI();
 
-  const engineInit = (async () => {
-    try {
-      const ok = await state.engine.init((msg) => {
-        els.pill.textContent = msg;
-        setSubtitle(msg);
-      });
-      if (ok) {
-        els.pill.textContent = `视觉引擎就绪 · ${state.engine.delegate}`;
-        els.pill.classList.add('ok');
-      } else {
-        els.pill.textContent = '视觉引擎不可用（仅读色）';
-        setSubtitle('人脸模型加载失败，读色功能仍可使用。');
-      }
-    } catch (err) {
-      console.error(err);
-      els.pill.textContent = '视觉引擎不可用（仅读色）';
-    }
-  })();
+  // 首屏只加载 55 KB 的示例图；模型空闲时预热，用户切到人脸模块时通常已就绪
+  setTimeout(() => ensureEngine(), 2500);
 
   if (FORCE_CAMERA) {
     const camOk = await useCamera();
-    await engineInit;
     if (!camOk) {
       setSourceUI('none', '');
       els.hint.textContent = '没有摄像头权限，可以上传图片或使用示例照片';
     }
   } else {
-    // 先显示示例照片（55 KB），模型在后台下载，避免慢网络下白屏
     const ok = await useExample();
     if (!ok) {
       setSourceUI('none', '');
       els.chooser.hidden = false;
-    }
-    await engineInit;
-    if (state.source.kind === 'image' && !state.lastGeometry) {
-      await detectCurrentImage();
     }
   }
 
