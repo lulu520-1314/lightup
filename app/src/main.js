@@ -767,9 +767,11 @@ async function loadImageSource(url, label) {
   if (state.engine.ready) {
     await detectCurrentImage();
   } else {
+    // 模型还在下载：先别急着读中心点（那里可能是鼻子），等模型就绪再定位嘴唇
     els.pill.textContent = '正在后台加载人脸模型…';
     els.pill.classList.remove('ok');
-    if (state.mode === 'object') readNow();
+    setSubtitle('人脸模型加载中，完成后会自动识别人脸；现在也可以直接点画面取色。');
+    els.hint.textContent = '模型加载中… 可直接点击画面取色';
   }
   return true;
 }

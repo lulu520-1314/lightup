@@ -31,6 +31,7 @@ async function run(blockModel) {
   const st = await page.evaluate(() => ({
     source: window.__lightup?.getState?.().source || null,
     chooserHidden: document.getElementById('chooser')?.hidden,
+    prematureResult: /深棕|黑色|中灰|白色/.test(document.getElementById('result')?.innerText || ''),
     photoVisible: !document.getElementById('photo')?.hidden && document.getElementById('photo').naturalWidth > 0,
     loupeVisible: !document.getElementById('loupeWrap')?.hidden,
     result: (document.getElementById('result')?.innerText || '').replace(/\n+/g, ' ').slice(0, 40),
@@ -55,6 +56,7 @@ async function slowModel() {
     photoVisible: !document.getElementById('photo')?.hidden && document.getElementById('photo').naturalWidth > 0,
     hasGeometry: !!window.__lightup?.getState?.().lastGeometry,
     chooserHidden: document.getElementById('chooser')?.hidden,
+    prematureResult: /深棕|黑色|中灰|白色/.test(document.getElementById('result')?.innerText || ''),
   }));
   await page.close();
   return early;
@@ -74,6 +76,7 @@ const report = {
   '降级：仍能给出读色结果': /红|色/.test(degraded.result),
   '慢网络：模型下载中就显示图片': early.photoVisible === true,
   '慢网络：不退回选择来源': early.chooserHidden === true,
+  '慢网络：不抢先读出错误结果': early.prematureResult === false,
 };
 console.log(JSON.stringify({ report, normal, degraded, early }, null, 2));
 const failed = Object.entries(report).filter(([, v]) => !v).map(([k]) => k);
