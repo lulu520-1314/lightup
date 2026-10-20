@@ -202,7 +202,7 @@ Windows 用户也可以直接双击 `app/启动Demo.bat`（自动装依赖、起
 │  ├─ vendor/             本地化的模型与 WASM（16.9 MB）
 │  ├─ assets/             示例人像
 │  └─ _dev/               自检、评估脚本（截图不入库）
-├─ deck/                  初赛提案 PPT 与演示视频脚本
+├─ deck/                  初赛提案 PPT（基于赛事官方模版）、生成脚本、演示视频脚本
 ├─ docs/screenshots/      README 用截图
 └─ README.md
 ```
@@ -224,7 +224,7 @@ git push -u origin main
 
 - **`app/vendor/` 约 17 MB**（模型 3.6 MB + WASM 12.9 MB），已随仓库提交，保证 clone 即跑，不需要联网下载模型。GitHub 单文件上限 100 MB，无需 LFS。
 - 仓库仅保留运行所需的 `vision_wasm_internal.*`（SIMD 版本）。**需要支持 WASM SIMD 的浏览器**（2021 年后的 Chrome / Edge / Safari 均可）。
-- `node_modules/`、`_dev/shots/`、`deck/render*/` 已在 `.gitignore` 中排除。
+- `node_modules/`、`_dev/shots/`、`deck/render*/`、`deck/tpl-*/` 已在 `.gitignore` 中排除。
 - 若要做在线演示，可部署到任意静态托管（GitHub Pages 需注意 `.wasm` 的 MIME，多数平台已正确支持）；`serve.mjs` 仅用于本地。
 
 ---

@@ -20,3 +20,12 @@ app/_dev/_*.py
 deck/render*/
 deck/render2/
 deck/_build_tmp.pptx
+
+# 模版渲染产物与旧版 PPT
+deck/tpl-check/
+deck/tpl-render/
+deck/_tpl_build.pptx
+deck/LightUp_初赛提案.pptx
+
+# Office 打开文件时的锁文件
+~$*
