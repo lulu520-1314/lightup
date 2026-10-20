@@ -75,6 +75,36 @@ await sleep(400);
 const s6 = await snap();
 await page.keyboard.press('Escape');
 
+// 7. 方向键导航：左右移动一格、上下跨行、Tab 离开网格
+{
+  await page.click('#btnLibrary');
+  await sleep(500);
+  const idxOf = () => page.evaluate(() => {
+    const cards = [...document.querySelectorAll('.lib-card')];
+    return cards.indexOf(document.activeElement);
+  });
+  const start = await idxOf();
+  await page.keyboard.press('ArrowRight');
+  await sleep(250);
+  const right = await idxOf();
+  await page.keyboard.press('ArrowDown');
+  await sleep(250);
+  const down = await idxOf();
+  await page.keyboard.press('ArrowUp');
+  await sleep(250);
+  const up = await idxOf();
+  await page.keyboard.press('Tab');
+  await sleep(250);
+  const tabbedOut = await page.evaluate(() => !document.activeElement?.closest('#libGrid'));
+  // 连按 Tab 若干次，焦点必须始终留在弹层内
+  for (let i = 0; i < 8; i++) await page.keyboard.press('Tab');
+  await sleep(200);
+  const stillInside = await page.evaluate(() => !!document.activeElement?.closest('#lib'));
+
+  globalThis.navResult = { start, right, down, up, tabbedOut, stillInside };
+  await page.keyboard.press('Escape');
+}
+
 await browser.close();
 
 const report = {
@@ -87,6 +117,11 @@ const report = {
   '设为目标后关闭并回写': s4.open === false && s4.subtitle.includes('目标'),
   'Esc 可关闭': s5.open === false,
   'L 快捷键可打开': s6.open === true,
+  '方向键右移一格': navResult.right === navResult.start + 1,
+  '方向键下移跨行': navResult.down > navResult.right,
+  '方向键上移可回退': navResult.up === navResult.right,
+  'Tab 会离开网格': navResult.tabbedOut === true,
+  '焦点不会跑出弹层': navResult.stillInside === true,
   '无控制台错误': errors.length === 0,
 };
 console.log(JSON.stringify({ report, counts: { all: s1.count, warm: s3.count }, subtitle: s4.subtitle, errors }, null, 2));

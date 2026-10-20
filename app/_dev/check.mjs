@@ -149,8 +149,10 @@ const state = (page) => page.evaluate(() => ({
     window.__lightup.read();
   }, initial);
   await sleep(600);
-  await page.click('#btnTryon');
-  await sleep(500);
+  await page.click('#modeTryon');
+  await sleep(700);
+  await page.click('.strip-chip[data-shade="豆沙色"]');
+  await sleep(700);
   await shot(page, '17-tryon');
 
   // 问一问：适合我吗

@@ -15,8 +15,8 @@ import {
 import { SHADES, TONE_ADVICE, matchPhrase } from './shades.js';
 import { sonifyColor, earcon, setMuted } from './audio.js';
 import {
-  speak, setSpeechEnabled, primeSpeech, stopSpeaking, setSpeechRate,
-  initVoices, setVoiceGender,
+  speak, speakUI, setSpeechEnabled, primeSpeech, stopSpeaking, setSpeechRate,
+  initVoices, setVoiceGender, setUIEnabled,
 } from './speech.js';
 import { FaceEngine, buildGeometry, shrinkPolygon, centroid } from './vision.js';
 
@@ -52,7 +52,6 @@ const els = {
   loupe: $('loupe'),
   loupeWrap: $('loupeWrap'),
   loupeLabel: $('loupeLabel'),
-  tryon: $('btnTryon'),
   qa: $('btnQA'),
   qaPanel: $('qaPanel'),
   qaAnswer: $('qaAnswer'),
@@ -60,6 +59,9 @@ const els = {
   btnMute: $('btnMute'),
   btnRate: $('btnRate'),
   btnVoice: $('btnVoice'),
+  btnUI: $('btnUI'),
+  btnLoupe: $('btnLoupe'),
+  loupeClose: $('loupeClose'),
   tip: $('tip'),
   tipTitle: $('tipTitle'),
   tipText: $('tipText'),
@@ -71,8 +73,15 @@ const els = {
   libClose: $('libClose'),
   libSel: $('libSel'),
   libPlay: $('libPlay'),
+  libTryon: $('libTryon'),
   libTarget: $('libTarget'),
 };
+
+// 元素自检：漏注册会在这里立刻暴露，而不是等某个监听器报 undefined
+{
+  const missing = Object.entries(els).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) console.warn('[LightUp] 未找到的界面元素：', missing.join(', '));
+}
 
 const lctx = els.loupe.getContext('2d');
 
@@ -98,10 +107,11 @@ const state = {
   whitePoint: null,                            // 白平衡参考（现场测到的"白"）
   calibrating: false,
   labHistory: [],                              // 摄像头模式下的时间平滑窗口
-  tryon: false,                                // 是否在唇部叠加试色
-  tryonColor: null,
+  tryonShade: null,                            // 试色模式当前选中的色号
   skinProfile: null,                           // 最近一次测得的肤色档案
   broadcast: true,                             // 播报总开关
+  uiSpeech: true,                              // 操作类播报（按钮/切换提示）
+  loupeOn: true,                               // 右下角放大镜是否显示
   voiceGender: 'female',                       // 音色：female | male
 };
 
@@ -271,9 +281,20 @@ function analyzeSkin(lab) {
     `建议选择${advice.pick.slice(0, 3).join('、')}这类颜色。` +
     (advice.avoid.length ? `尽量避开${advice.avoid.slice(0, 2).join('和')}。` : '');
 
+  // 从色卡里挑 3 支：色调匹配、且尽量不在同一个色系，避免推荐的全是红
+  const seenFamily = new Set();
+  const recommend = [];
+  for (const sh of SHADES) {
+    if (!(sh.tone === tone.key || sh.tone === 'neutral')) continue;
+    if (seenFamily.has(sh.family)) continue;
+    seenFamily.add(sh.family);
+    recommend.push(sh);
+    if (recommend.length >= 3) break;
+  }
+
   return {
     kind: 'skin', name: `${tone.label} · ${band.label}`, en: band.label,
-    hsv, lab, tone, ita, band, advice,
+    hsv, lab, tone, ita, band, advice, recommend,
     hex: rgbToHex(r, g, b), sentence,
     tags: [tone.label, `ITA ${ita.toFixed(0)}°`],
     // 肤色判断真正用到的只有两个量：深浅、冷暖。
@@ -351,12 +372,25 @@ function renderResult(res) {
        </div>`
     : '';
 
+  const skinExtra = res.kind === 'skin' ? `
+    <p class="strip-title">适合你的色号（点一下直接试色）</p>
+    <div class="strip">
+      ${(res.recommend || []).map((x) => `
+        <button class="strip-chip" data-rec="${x.zh}" aria-label="${x.zh}，去试色">
+          <span class="sw" style="background:${x.hex}"></span><span>${x.zh}</span>
+        </button>`).join("")}
+    </div>
+    ${res.advice?.avoid?.length
+      ? `<p class="strip-title">建议避开：${res.advice.avoid.join('、')}</p>` : ""}
+  ` : "";
+
   els.result.innerHTML = `
     <div class="result-name">${res.name}</div>
     <div class="result-en">${res.en}</div>
     <div class="result-sentence">${res.sentence}</div>
     <div class="tags">${tags}</div>
     ${metricCards}
+    ${skinExtra}
     ${alternatives}
   `;
 }
@@ -390,9 +424,10 @@ function drawOverlay(geo, srcW, srcH) {
 
   const dpr = window.devicePixelRatio || 1;
   const m = coverMap(srcW, srcH);
+  const mode = state.mode;
 
-  // 取色点标记（点哪读哪）
-  if (state.mode === 'object') {
+  // 读色：只画取色圈，不画身体部位
+  if (mode === 'object') {
     const p = m.toScreen({ x: state.pick.x * srcW, y: state.pick.y * srcH });
     const r = state.radius * m.scale;
     octx.beginPath();
@@ -404,24 +439,44 @@ function drawOverlay(geo, srcW, srcH) {
     octx.arc(p.x, p.y, 2.2 * dpr, 0, Math.PI * 2);
     octx.fillStyle = 'rgba(201,162,39,.95)';
     octx.fill();
+    return;
   }
 
-  // 读色模式只看取色点；肤色 / 妆容模式才画人脸几何
-  if (!geo || state.mode === 'object') return;
-
+  if (!geo) return;
   octx.lineWidth = 1.6 * dpr;
 
+  // 诊肤色：只标出脸颊采样区与脸部范围，不画嘴唇
+  if (mode === 'skin') {
+    (geo.skinPoints || geo.cheeks).forEach((c) => {
+      const p = m.toScreen(c);
+      octx.beginPath();
+      octx.arc(p.x, p.y, c.r * m.scale, 0, Math.PI * 2);
+      octx.strokeStyle = 'rgba(255,255,255,.55)';
+      octx.setLineDash([4 * dpr, 4 * dpr]);
+      octx.stroke();
+      octx.setLineDash([]);
+    });
+
+    const f0 = m.toScreen({ x: geo.faceBox.x, y: geo.faceBox.y });
+    const f1 = m.toScreen({ x: geo.faceBox.x + geo.faceBox.w, y: geo.faceBox.y + geo.faceBox.h });
+    const c2 = 18 * dpr;
+    octx.strokeStyle = 'rgba(255,255,255,.22)';
+    octx.beginPath();
+    octx.moveTo(f0.x, f0.y + c2); octx.lineTo(f0.x, f0.y); octx.lineTo(f0.x + c2, f0.y);
+    octx.moveTo(f1.x - c2, f0.y); octx.lineTo(f1.x, f0.y); octx.lineTo(f1.x, f0.y + c2);
+    octx.moveTo(f0.x, f1.y - c2); octx.lineTo(f0.x, f1.y); octx.lineTo(f0.x + c2, f1.y);
+    octx.moveTo(f1.x - c2, f1.y); octx.lineTo(f1.x, f1.y); octx.lineTo(f1.x, f1.y - c2);
+    octx.stroke();
+    return;
+  }
+
+  // 查妆容 / 试色：只画唇部
   octx.beginPath();
   geo.lipOuter.map(m.toScreen).forEach((p, i) => (i ? octx.lineTo(p.x, p.y) : octx.moveTo(p.x, p.y)));
   octx.closePath();
 
-  // 试色：把选中的色号直接涂在唇部（给身边的"眼睛"看）
-  if (state.tryon && state.tryonColor) {
-    octx.save();
-    octx.globalAlpha = 0.55;
-    octx.fillStyle = state.tryonColor;
-    octx.fill();
-    octx.restore();
+  if (mode === 'tryon' && state.tryonShade) {
+    paintLips(geo, m, srcW, srcH);
   }
 
   octx.strokeStyle = 'rgba(201,162,39,.92)';
@@ -432,31 +487,63 @@ function drawOverlay(geo, srcW, srcH) {
   octx.closePath();
   octx.strokeStyle = 'rgba(201,162,39,.36)';
   octx.stroke();
+}
 
-  geo.cheeks.forEach((c) => {
-    const p = m.toScreen(c);
-    octx.beginPath();
-    octx.arc(p.x, p.y, c.r * m.scale, 0, Math.PI * 2);
-    octx.strokeStyle = 'rgba(255,255,255,.45)';
-    octx.setLineDash([4 * dpr, 4 * dpr]);
-    octx.stroke();
-    octx.setLineDash([]);
-  });
+/* ================= 试色上妆 ================= */
+/**
+ * 直接盖一层半透明色块会像贴纸。正确做法：
+ *   1) 把原图裁到唇形（边缘羽化），保住唇纹与高光
+ *   2) 用 color 混合模式只替换"色相/饱和度"，保留原图的明暗
+ * 这样唇珠、唇缝、反光都还在，颜色看起来是"长在上面"的。
+ */
+const tryCanvas = document.createElement('canvas');
+const tryCtx = tryCanvas.getContext('2d');
 
-  const f0 = m.toScreen({ x: geo.faceBox.x, y: geo.faceBox.y });
-  const f1 = m.toScreen({ x: geo.faceBox.x + geo.faceBox.w, y: geo.faceBox.y + geo.faceBox.h });
-  const c = 18 * dpr;
-  octx.strokeStyle = 'rgba(255,255,255,.22)';
-  octx.beginPath();
-  octx.moveTo(f0.x, f0.y + c); octx.lineTo(f0.x, f0.y); octx.lineTo(f0.x + c, f0.y);
-  octx.moveTo(f1.x - c, f0.y); octx.lineTo(f1.x, f0.y); octx.lineTo(f1.x, f0.y + c);
-  octx.moveTo(f0.x, f1.y - c); octx.lineTo(f0.x, f1.y); octx.lineTo(f0.x + c, f1.y);
-  octx.moveTo(f1.x - c, f1.y); octx.lineTo(f1.x, f1.y); octx.lineTo(f1.x, f1.y - c);
-  octx.stroke();
+function lipPath(geo, m) {
+  const path = new Path2D();
+  geo.lipOuter.map(m.toScreen).forEach((p, i) => (i ? path.lineTo(p.x, p.y) : path.moveTo(p.x, p.y)));
+  path.closePath();
+  return path;
+}
+
+function paintLips(geo, m, srcW, srcH) {
+  const w = overlay.width;
+  const h = overlay.height;
+  if (tryCanvas.width !== w || tryCanvas.height !== h) {
+    tryCanvas.width = w;
+    tryCanvas.height = h;
+  }
+  const path = lipPath(geo, m);
+  tryCtx.clearRect(0, 0, w, h);
+
+  // 1) 底图（整幅，稍后裁掉唇外部分）
+  tryCtx.globalCompositeOperation = 'source-over';
+  tryCtx.globalAlpha = 1;
+  tryCtx.filter = 'none';
+  tryCtx.drawImage(frameCanvas, 0, 0, srcW, srcH, m.offX, m.offY, srcW * m.scale, srcH * m.scale);
+
+  // 2) 只留唇部，并用 blur 让边界柔和过渡
+  tryCtx.globalCompositeOperation = 'destination-in';
+  tryCtx.filter = 'blur(3px)';
+  tryCtx.fillStyle = '#fff';
+  tryCtx.fill(path);
+  tryCtx.filter = 'none';
+
+  // 3) 上色：color 混合 = 替换色相与饱和度，保留明暗纹理
+  tryCtx.globalCompositeOperation = 'color';
+  tryCtx.globalAlpha = 0.92;
+  tryCtx.fillStyle = state.tryonShade.hex;
+  tryCtx.fill(path);
+
+  // 4) 叠回覆盖层
+  tryCtx.globalCompositeOperation = 'source-over';
+  tryCtx.globalAlpha = 1;
+  octx.drawImage(tryCanvas, 0, 0);
 }
 
 /* ================= 放大镜 ================= */
 function drawLoupe() {
+  if (!state.loupeOn) { els.loupeWrap.hidden = true; return; }
   if (state.mode !== 'object' || state.source.kind === 'none') {
     els.loupeWrap.hidden = true;
     return;
@@ -753,7 +840,7 @@ els.stage.addEventListener('click', (e) => {
 /* ================= 动作 ================= */
 function announceAndShow(text) {
   setSubtitle(text);
-  speak(text);
+  speakUI(text);
   earcon('error');
 }
 
@@ -767,8 +854,6 @@ function finish(res) {
   els.replay.disabled = false;
   els.remember.hidden = res.kind !== 'object' || res.isShade === false;
   els.goRead.hidden = !(res.kind === 'check' && res.needsTarget);
-  els.tryon.disabled = !(res.kind === 'object' || res.kind === 'check') || !res.hex;
-  if (res.hex) state.tryonColor = res.hex;
   if (res.kind === 'skin') {
     state.skinProfile = { tone: res.tone.key, band: res.band.label, ita: res.ita };
   }
@@ -819,15 +904,28 @@ function readNow() {
   }
 
   if (state.mode === 'skin') {
-    const px = geo.cheeks.flatMap((c) => collectDisc(c.x, c.y, c.r, 2) || []);
-    const robust = robustColor(px, state.whitePoint);
-    if (!robust) return announceAndShow('脸颊取色失败。');
-    return finish(analyzeSkin(robust.lab));
+    // 三个点各自取一次，再对三组 Lab 取中位：
+    // 任一点落在头发/阴影上，中位数仍能守住肤色主体
+    const perPoint = geo.skinPoints
+      .map((c) => robustColor(collectDisc(c.x, c.y, c.r, 2), state.whitePoint))
+      .filter(Boolean)
+      .map((r) => r.lab);
+    if (!perPoint.length) return announceAndShow('脸颊取色失败。');
+    const lab = [0, 1, 2].map((i) => medianOf(perPoint.map((l) => l[i])));
+    return finish(analyzeSkin(lab));
   }
 
   const px = collectPolygon(shrinkPolygon(geo.lipOuter, 0.74), { minSat: 0.15 });
   const robust = robustColor(px, state.whitePoint, { chromaTop: 0.25 });
   if (!robust) return announceAndShow('唇部取色失败，请换一张正脸照片。');
+
+  if (state.mode === 'tryon') {
+    const best = nearestShade(robust.lab)[0].shade;
+    setTryonShade(best.zh);
+    setSubtitle(`你现在的唇色接近 ${best.zh}，已按这个色号试色。`);
+    speak(`你现在的唇色接近 ${best.zh}。`);
+    return;
+  }
   finish(analyzeCheck(withSmoothing(robust.lab)));
 }
 
@@ -874,38 +972,93 @@ function calibrateFromPick(src) {
 
 /* ================= 模式 ================= */
 const MODE_META = {
-  object: { label: '读一读这个颜色', hint: '把口红对准圆框，或点击画面任意位置' },
-  skin: { label: '测一测我的肤色', hint: '正对镜头，让脸颊填满画面' },
-  check: { label: '看一看涂得准不准', hint: '正对镜头，露出嘴唇' },
+  object: { name: '读色', label: '读一读这个颜色', hint: '把口红对准圆框，或点击画面任意位置' },
+  skin: { name: '诊肤色', label: '测一测我的肤色', hint: '正对镜头，让脸颊填满画面' },
+  check: { name: '查妆容', label: '看一看涂得准不准', hint: '正对镜头，露出嘴唇' },
+  tryon: { name: '试色', label: '挑一支试试颜色', hint: '选一支色号，直接涂在唇形上看' },
 };
 
-function setMode(mode) {
+const MODE_KEYS = ['object', 'skin', 'check', 'tryon'];
+
+function setMode(mode, fromInit = false) {
   state.mode = mode;
-  ['object', 'skin', 'check'].forEach((m) => {
+  MODE_KEYS.forEach((m) => {
     const btn = $('mode' + m[0].toUpperCase() + m.slice(1));
     btn.setAttribute('aria-selected', String(m === mode));
     btn.tabIndex = m === mode ? 0 : -1;
   });
   els.readLabel.textContent = MODE_META[mode].label;
   els.hint.textContent = MODE_META[mode].hint;
+  if (!fromInit) speakUI(`${MODE_META[mode].name}模式。`);
   els.remember.hidden = true;
   els.goRead.hidden = true;
 
   const src = sourceInfo();
-  if (src) {
-    drawOverlay(state.lastGeometry, src.w, src.h);
-  }
+  if (src) drawOverlay(state.lastGeometry, src.w, src.h);
   drawLoupe();
+
+  if (mode === 'tryon') {
+    if (!state.tryonShade) {
+      state.tryonShade = SHADES.find((x) => x.zh === '豆沙色') || SHADES[0];
+    }
+    renderTryonPanel();
+    setSubtitle(MODE_META.tryon.hint);
+    return;
+  }
 
   els.result.innerHTML = `<div class="result-placeholder">
       <p>${MODE_META[mode].hint}。</p>
       <p class="dim">${mode === 'check'
-        ? (state.targetShade
-            ? `当前目标色：${state.targetShade.zh}。按空格开始比对。`
-            : '还没有目标色：先去「读色」读取口红并记住色号，再回来比对。')
+        ? '先在「读色」里记住一支口红的色号，再来比对实际唇色。'
         : '所有计算在本机完成，画面不会上传。'}</p>
     </div>`;
   setSubtitle(MODE_META[mode].hint);
+}
+
+/* ---------------- 试色面板 ---------------- */
+const QUICK_SHADES = ['正红', '复古红', '砖红', '番茄红', '珊瑚橘', '蜜桃色',
+                      '焦糖棕', '奶茶色', '豆沙色', '裸粉', '莓果紫', '火龙果'];
+
+function renderTryonPanel() {
+  const cur = state.tryonShade || SHADES[0];
+  const chips = QUICK_SHADES.map((zh) => SHADES.find((x) => x.zh === zh)).filter(Boolean);
+
+  els.result.innerHTML = `
+    <div class="result-name">${cur.zh}</div>
+    <div class="result-en">${cur.en}</div>
+    <div class="result-sentence">已经涂在你的唇形上。换一支看看，或按空格读取你现在的唇色。</div>
+    <div class="tags">
+      <span class="tag gold">${TONE_LABEL[cur.tone]}</span>
+      <span class="tag">${cur.hex.toUpperCase()}</span>
+    </div>
+    <p class="strip-title">快速换色</p>
+    <div class="strip">
+      ${chips.map((x) => `
+        <button class="strip-chip ${x.zh === cur.zh ? 'on' : ''}" data-shade="${x.zh}"
+                aria-pressed="${x.zh === cur.zh}" aria-label="${x.zh}，${TONE_LABEL[x.tone]}">
+          <span class="sw" style="background:${x.hex}"></span><span>${x.zh}</span>
+        </button>`).join("")}
+      <button class="strip-chip more" data-more="1" aria-label="打开色卡库，浏览全部色号">
+        <span class="sw">＋</span><span>更多</span>
+      </button>
+    </div>
+    <div class="metric-row">
+      <button class="metric" data-act="target"><strong>${cur.zh}</strong><span>设为验妆目标</span></button>
+      <button class="metric" data-act="listen"><strong>♪</strong><span>再听一次</span></button>
+    </div>`;
+}
+
+function setTryonShade(zh) {
+  const shade = SHADES.find((x) => x.zh === zh);
+  if (!shade) return;
+  state.tryonShade = shade;
+  const src = sourceInfo();
+  grabFrame();                       // 上妆要用当前帧做底图
+  if (src) drawOverlay(state.lastGeometry, src.w, src.h);
+  renderTryonPanel();
+  const [r, g, b] = hexToRgb(shade.hex);
+  sonifyColor(rgb2hsv(r, g, b), shade.tone);
+  setTimeout(() => speak(`${shade.zh}，${TONE_LABEL[shade.tone]}。`), 520);
 }
 
 /* ================= 离线问答（不依赖任何 API） ================= */
@@ -981,7 +1134,7 @@ function cycleRate() {
   els.btnRate.textContent = `语速 ${r.toFixed(1)}×`;
   if (state.broadcast) {
     primeSpeech();
-    speak(`语速 ${r.toFixed(1)} 倍。`);
+    speakUI(`语速 ${r.toFixed(1)} 倍。`);
   }
 }
 
@@ -993,7 +1146,7 @@ function toggleVoice() {
   try { localStorage.setItem('lightup.voice', g); } catch (_) { /* ignore */ }
   if (state.broadcast) {
     primeSpeech();
-    speak(g === 'male' ? '男声。' : '女声。');
+    speakUI(g === 'male' ? '男声。' : '女声。');
   }
 }
 
@@ -1001,11 +1154,34 @@ els.btnMute.addEventListener('click', () => {
   setBroadcast(!state.broadcast);
   if (state.broadcast) {
     primeSpeech();
-    speak('播报已开启。');
+    speakUI('播报已开启。');
   }
 });
 els.btnRate.addEventListener('click', cycleRate);
 els.btnVoice.addEventListener('click', toggleVoice);
+
+function setLoupe(on, announce = true) {
+  state.loupeOn = on;
+  els.btnLoupe.setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem('lightup.loupe', on ? '1' : '0'); } catch (_) { /* ignore */ }
+  drawLoupe();
+  if (announce) speakUI(on ? '放大镜已打开。' : '放大镜已关闭。');
+}
+els.btnLoupe.addEventListener('click', () => setLoupe(!state.loupeOn));
+els.loupeClose.addEventListener('click', () => setLoupe(false));
+
+function toggleUI() {
+  state.uiSpeech = !state.uiSpeech;
+  setUIEnabled(state.uiSpeech);
+  els.btnUI.setAttribute('aria-pressed', String(state.uiSpeech));
+  els.btnUI.textContent = state.uiSpeech ? '操作' : '操作·关';
+  try { localStorage.setItem('lightup.uiSpeech', state.uiSpeech ? '1' : '0'); } catch (_) { /* ignore */ }
+  if (state.uiSpeech) {
+    primeSpeech();
+    speakUI('操作提示已开启。');
+  }
+}
+els.btnUI.addEventListener('click', toggleUI);
 
 /* ================= 色卡库 ================= */
 let libFilter = 'all';
@@ -1031,11 +1207,12 @@ function renderLibrary() {
     els.libGrid.innerHTML = '<p class="lib-empty">先到「诊肤色」测一次，这里就只列出适合你的色号。</p>';
     return;
   }
-  els.libCount.textContent = `${list.length} 支 · 点任意色号，听它的旋律`;
+  els.libCount.textContent = `${list.length} 支 · 方向键浏览，选中即试听`;
   els.libGrid.innerHTML = list.map(({ s, i }) => {
     const fit = fitsMe(s);
     const fitTxt = fit === true ? ' · <span class="fits">适合你</span>' : '';
-    return `<button class="lib-card" role="option" data-idx="${i}"
+    const tabbable = (libSelected >= 0 ? i === libSelected : i === list[0].i);
+    return `<button class="lib-card" role="option" data-idx="${i}" tabindex="${tabbable ? 0 : -1}"
         aria-selected="${i === libSelected}"
         aria-label="${s.zh}，${TONE_LABEL[s.tone]}，色值 ${s.hex}${fit === true ? '，适合你的肤色' : ''}">
       <span class="lib-sw" style="background:${s.hex}"></span>
@@ -1044,6 +1221,69 @@ function renderLibrary() {
     </button>`;
   }).join('');
 }
+
+/** 方向键在当前网格里找"最接近的那个方向"的卡片，兼容任意列数 */
+function moveLibFocus(dir) {
+  const cards = [...els.libGrid.querySelectorAll('.lib-card')];
+  if (!cards.length) return;
+  const cur = cards.indexOf(document.activeElement);
+  if (cur < 0) return cards[0].focus();
+
+  const r = cards[cur].getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+
+  let best = -1;
+  let bestScore = Infinity;
+  cards.forEach((card, i) => {
+    if (i === cur) return;
+    const cr = card.getBoundingClientRect();
+    const dx = cr.left + cr.width / 2 - cx;
+    const dy = cr.top + cr.height / 2 - cy;
+
+    const inDir =
+      (dir === 'left' && dx < -4) ||
+      (dir === 'right' && dx > 4) ||
+      (dir === 'up' && dy < -4) ||
+      (dir === 'down' && dy > 4);
+    if (!inDir) return;
+
+    const horizontal = dir === 'left' || dir === 'right';
+    const primary = horizontal ? Math.abs(dx) : Math.abs(dy);
+    const cross = horizontal ? Math.abs(dy) : Math.abs(dx);
+    const score = primary + cross * 3;   // 偏轴惩罚：优先正上/正下/正左/正右
+
+    if (score < bestScore) { bestScore = score; best = i; }
+  });
+
+  if (best >= 0) {
+    cards[best].focus();
+    cards[best].scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function syncLibTabindex() {
+  const cards = [...els.libGrid.querySelectorAll('.lib-card')];
+  const focused = cards.indexOf(document.activeElement);
+  cards.forEach((c, i) => c.setAttribute('tabindex', String(i === focused || (focused < 0 && i === 0) ? 0 : -1)));
+}
+
+els.libGrid.addEventListener('keydown', (e) => {
+  const dirs = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  if (dirs[e.key]) {
+    e.preventDefault();
+    moveLibFocus(dirs[e.key]);
+    return;
+  }
+  if (e.key === 'Home' || e.key === 'End') {
+    const cards = [...els.libGrid.querySelectorAll('.lib-card')];
+    if (!cards.length) return;
+    e.preventDefault();
+    (e.key === 'Home' ? cards[0] : cards[cards.length - 1]).focus();
+  }
+});
+
+els.libGrid.addEventListener('focusin', syncLibTabindex);
 
 function selectShade(idx, { play = true } = {}) {
   const shade = SHADES[idx];
@@ -1059,6 +1299,7 @@ function selectShade(idx, { play = true } = {}) {
     `已选 <b>${shade.zh}</b> · ${TONE_LABEL[shade.tone]} · ${shade.hex.toUpperCase()}` +
     (fit === true ? ' · 适合你的肤色' : fit === false ? ' · 与你的肤色不太搭' : '');
   els.libPlay.disabled = false;
+  els.libTryon.disabled = false;
   els.libTarget.disabled = false;
 
   if (play) {
@@ -1076,7 +1317,7 @@ function openLibrary() {
   els.lib.hidden = false;
   const first = els.libGrid.querySelector('.lib-card');
   (first || els.libClose).focus();
-  speak(`色卡库，共 ${SHADES.length} 支。用 Tab 浏览，回车试听。`);
+  speakUI(`色卡库，共 ${SHADES.length} 支。用方向键浏览，选中即试听。`);
 }
 
 function closeLibrary() {
@@ -1108,6 +1349,15 @@ document.querySelectorAll('.lib-filters .src-btn').forEach((btn) => {
 
 els.libPlay.addEventListener('click', () => {
   if (libSelected >= 0) selectShade(libSelected);
+});
+
+els.libTryon.addEventListener('click', () => {
+  const shade = SHADES[libSelected];
+  if (!shade) return;
+  closeLibrary();
+  setMode('tryon');
+  setTryonShade(shade.zh);
+  setSubtitle(`正在试 ${shade.zh}`);
 });
 
 els.libTarget.addEventListener('click', () => {
@@ -1160,6 +1410,22 @@ function openTip(key, trigger) {
   speak(`${tip.title}。${tip.text}`);
 }
 
+/** 弹层内的焦点循环：Tab / Shift+Tab 只在弹层里转，不会跑到背后的页面 */
+function trapFocus(container, e) {
+  const items = [...container.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.offsetParent !== null && !el.disabled);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function closeTip() {
   if (els.tip.hidden) return;
   els.tip.hidden = true;
@@ -1168,8 +1434,34 @@ function closeTip() {
 }
 
 els.result.addEventListener('click', (e) => {
-  const btn = e.target.closest('.metric[data-tip]');
-  if (btn) openTip(btn.dataset.tip, btn);
+  const tipBtn = e.target.closest('.metric[data-tip]');
+  if (tipBtn) return openTip(tipBtn.dataset.tip, tipBtn);
+
+  const shadeBtn = e.target.closest('[data-shade]');
+  if (shadeBtn && state.mode === 'tryon') return setTryonShade(shadeBtn.dataset.shade);
+
+  const recBtn = e.target.closest('[data-rec]');
+  if (recBtn) {
+    setMode('tryon');
+    return setTryonShade(recBtn.dataset.rec);
+  }
+
+  if (e.target.closest('[data-more]')) return openLibrary();
+
+  const act = e.target.closest('[data-act]');
+  if (act) {
+    const shade = state.tryonShade;
+    if (!shade) return;
+    if (act.dataset.act === 'target') {
+      state.targetShade = shade;
+      setSubtitle(`已把 ${shade.zh} 设为验妆目标`);
+      speak(`已把 ${shade.zh} 设为验妆目标。`);
+    } else if (act.dataset.act === 'listen') {
+      const [r, g, b] = hexToRgb(shade.hex);
+      sonifyColor(rgb2hsv(r, g, b), shade.tone);
+      setTimeout(() => speak(`${shade.zh}，${TONE_LABEL[shade.tone]}。`), 520);
+    }
+  }
 });
 els.tipClose.addEventListener('click', closeTip);
 els.tip.addEventListener('click', (e) => {
@@ -1182,6 +1474,7 @@ els.read.addEventListener('click', () => { primeSpeech(); readNow(); });
 $('modeObject').addEventListener('click', () => setMode('object'));
 $('modeSkin').addEventListener('click', () => setMode('skin'));
 $('modeCheck').addEventListener('click', () => setMode('check'));
+$('modeTryon').addEventListener('click', () => setMode('tryon'));
 
 els.replay.addEventListener('click', () => {
   if (!state.lastResult) return;
@@ -1213,17 +1506,6 @@ els.help.addEventListener('click', () => {
   const willOpen = els.legend.hidden;
   els.legend.hidden = !willOpen;
   els.help.setAttribute('aria-expanded', String(willOpen));
-});
-
-/* 试色：把色号叠到唇形上 */
-els.tryon.addEventListener('click', () => {
-  if (!state.tryonColor) return;
-  state.tryon = !state.tryon;
-  els.tryon.setAttribute('aria-pressed', String(state.tryon));
-  els.tryon.textContent = state.tryon ? '关闭试色' : '试色';
-  const src = sourceInfo();
-  if (src) drawOverlay(state.lastGeometry, src.w, src.h);
-  announceAndShow(state.tryon ? '已把颜色试在唇形上，可以给身边的人看。' : '已关闭试色。');
 });
 
 /* 问一问 */
@@ -1339,6 +1621,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   if (!els.lib.hidden) {
+    if (e.key === 'Tab') return trapFocus(els.lib, e);
     if (e.key === 'r' || e.key === 'R') els.libPlay.click();
     return;
   }
@@ -1349,7 +1632,10 @@ document.addEventListener('keydown', (e) => {
     closeTip();
     return;
   }
-  if (!els.tip.hidden) return;
+  if (!els.tip.hidden) {
+    if (e.key === 'Tab') return trapFocus(els.tip, e);
+    return;
+  }
 
   // 焦点在指标卡片上时，空格应该"打开说明"，而不是触发读色
   if (e.code === 'Space' && document.activeElement?.closest('.metric')) return;
@@ -1358,6 +1644,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '1') setMode('object');
   if (e.key === '2') setMode('skin');
   if (e.key === '3') setMode('check');
+  if (e.key === '4') setMode('tryon');
   if (e.key === 'r' || e.key === 'R') els.replay.click();
   if (e.key === 'b' || e.key === 'B') els.bigText.click();
   if (e.key === 'y' || e.key === 'Y') els.btnVoice.click();
@@ -1366,6 +1653,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'l' || e.key === 'L') els.btnLibrary.click();
   if (e.key === 'm' || e.key === 'M') els.btnMute.click();
   if (e.key === 't' || e.key === 'T') els.btnRate.click();
+  if (e.key === 'o' || e.key === 'O') els.btnUI.click();
+  if (e.key === 'g' || e.key === 'G') els.btnLoupe.click();
   // 方向键微调取色点
   const nudges = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   if (nudges[e.key] && state.source.kind !== 'none') {
@@ -1397,6 +1686,9 @@ window.__lightup = {
     radius: state.radius,
     source: state.source.kind,
     sample: state.lastSample || null,
+    geometry: state.lastGeometry,
+    skinProfile: state.skinProfile,
+    whitePoint: state.whitePoint,
     result: state.lastResult
       ? { name: state.lastResult.name, isShade: state.lastResult.isShade, dE: state.lastResult.dE }
       : null,
@@ -1413,6 +1705,20 @@ async function boot() {
       state.voiceGender = vg;
       setVoiceGender(vg);
       els.btnVoice.textContent = `音色 ${vg === 'male' ? '男声' : '女声'}`;
+    }
+  } catch (_) { /* ignore */ }
+  try {
+    if (localStorage.getItem('lightup.uiSpeech') === '0') {
+      state.uiSpeech = false;
+      setUIEnabled(false);
+      els.btnUI.setAttribute('aria-pressed', 'false');
+      els.btnUI.textContent = '操作·关';
+    }
+  } catch (_) { /* ignore */ }
+  try {
+    if (localStorage.getItem('lightup.loupe') === '0') {
+      state.loupeOn = false;
+      els.btnLoupe.setAttribute('aria-pressed', 'false');
     }
   } catch (_) { /* ignore */ }
   setBroadcast(true);

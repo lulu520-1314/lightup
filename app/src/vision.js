@@ -204,13 +204,21 @@ export function buildGeometry(landmarksPx) {
     h: Math.max(...ys) - Math.min(...ys),
   };
 
+  // 第三个点取额头（发际线下方、眉心上方）：脸颊被头发遮挡时的兜底
+  const forehead = lerp(landmarksPx[P.forehead], nose, 0.42);
+  const r = 0.045 * faceWidth;
+
+  const skinPoints = [
+    { x: leftCheek.x, y: leftCheek.y + cheekY, r, part: 'left' },
+    { x: rightCheek.x, y: rightCheek.y + cheekY, r, part: 'right' },
+    { x: forehead.x, y: forehead.y, r: 0.04 * faceWidth, part: 'forehead' },
+  ];
+
   return {
     lipOuter,
     lipInner,
-    cheeks: [
-      { x: leftCheek.x, y: leftCheek.y + cheekY, r: 0.045 * faceWidth },
-      { x: rightCheek.x, y: rightCheek.y + cheekY, r: 0.045 * faceWidth },
-    ],
+    skinPoints,
+    cheeks: skinPoints,      // 兼容旧命名
     faceWidth,
     faceBox,
   };

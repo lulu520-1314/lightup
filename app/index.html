@@ -56,6 +56,7 @@
       <span class="dot-sm"></span>开
     </button>
     <span class="audio-divider" aria-hidden="true"></span>
+    <button class="chip-btn" id="btnUI" aria-pressed="true" title="只控制按钮与切换的提示音，不影响颜色/妆容播报（快捷键 O）">操作</button>
     <button class="chip-btn" id="btnRate" title="语速（快捷键 T）">语速 1.0×</button>
     <button class="chip-btn" id="btnVoice" title="切换男声 / 女声（快捷键 Y）">音色 女声</button>
   </div>
@@ -86,12 +87,13 @@
     </div>
 
     <div class="stage-top">
-      <span class="live-pill" id="enginePill">初始化中</span>
+      <span class="sr-only" id="enginePill" aria-live="polite">初始化中</span>
       <span class="swatch" id="swatch" aria-hidden="true"></span>
     </div>
 
     <!-- 放大镜：显示取样区域，可在里面拖动微调 -->
     <div class="loupe-wrap" id="loupeWrap" hidden>
+      <button class="loupe-close" id="loupeClose" aria-label="关闭放大镜" title="关闭放大镜">×</button>
       <canvas id="loupe" class="loupe" width="320" height="320" aria-hidden="true"></canvas>
       <div class="loupe-bar">
         <span id="loupeLabel">取样半径 0 px</span>
@@ -126,6 +128,7 @@
     <button class="src-btn" id="srcExample">示例照片</button>
     <button class="src-btn" id="srcCamera">摄像头</button>
     <button class="src-btn" id="srcUpload">上传图片</button>
+    <button class="src-btn" id="btnLoupe" aria-pressed="true" title="显示 / 隐藏右下角放大镜（快捷键 G）">放大镜</button>
     <button class="src-btn" id="btnCalib" title="用一张白纸做白平衡校准，可显著提高取色准确度">白平衡</button>
     <span class="src-name" id="srcName"></span>
   </div>
@@ -146,6 +149,9 @@
       <button role="tab" class="mode" id="modeCheck" aria-selected="false" tabindex="-1">
         <b>查妆容</b><small>比对目标色</small>
       </button>
+      <button role="tab" class="mode" id="modeTryon" aria-selected="false" tabindex="-1">
+        <b>试色</b><small>涂上看看</small>
+      </button>
     </nav>
 
     <button class="primary-btn" id="btnRead">
@@ -161,10 +167,8 @@
     </div>
 
     <div class="panel-foot">
-      <button class="ghost-btn" id="btnReplay" disabled>再听一次 <kbd>R</kbd></button>
       <button class="ghost-btn" id="btnRemember" hidden>记住这个色号</button>
       <button class="ghost-btn" id="btnGoRead" hidden>去「读色」设目标 →</button>
-      <button class="ghost-btn" id="btnTryon" disabled>试色</button>
       <button class="ghost-btn" id="btnLibrary">色卡库</button>
       <button class="ghost-btn" id="btnQA">问一问</button>
       <button class="ghost-btn" id="btnHelp" aria-expanded="false">声音怎么听？</button>
@@ -196,14 +200,15 @@
 
 <!-- ================= 字幕带（无障碍：语音内容的文字镜像） ================= -->
 <footer class="subtitle-bar">
-  <span class="kbd-hint">1 / 2 / 3 切模式</span>
-  <span class="sep">·</span>
-  <span class="kbd-hint">L 色卡库</span>
-  <span class="sep">·</span>
-  <span class="kbd-hint">M 播报</span>
-  <span class="sep">·</span>
-  <span class="kbd-hint">Y 音色</span>
-  <span class="sep">·</span>
+  <div class="footer-tools">
+    <button class="ghost-btn replay-btn" id="btnReplay" disabled>再听一次 <kbd>R</kbd></button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <span class="hint"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> 切模式</span>
+    <span class="hint"><kbd>L</kbd> 色卡库</span>
+    <span class="hint"><kbd>M</kbd> 播报</span>
+    <span class="hint"><kbd>Y</kbd> 音色</span>
+    <span class="hint"><kbd>O</kbd> 操作</span>
+  </div>
   <p class="subtitle" id="subtitle">准备就绪</p>
 </footer>
 
@@ -230,6 +235,7 @@
     <footer class="lib-foot">
       <span class="lib-sel" id="libSel">未选择色号</span>
       <button class="ghost-btn" id="libPlay" disabled>再听一次 <kbd>R</kbd></button>
+      <button class="ghost-btn" id="libTryon" disabled>试色</button>
       <button class="ghost-btn" id="libTarget" disabled>设为验妆目标</button>
     </footer>
   </div>

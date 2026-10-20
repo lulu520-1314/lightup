@@ -283,21 +283,23 @@ text(s, M, 6.66, 11.6, 0.45,
 # ---------------------------------------------------------------- 05 三个能力
 s = new_slide(prs)
 page_no(s, 5)
-title(s, "三个能力，让一个人独立走完整条链路",
+title(s, "四个模块，从选色到试色都在同一个页面",
       "选色 → 试色 → 验妆，全程不需要第三个人在场。")
 
 caps = [("读色", "举到镜头前", "色号名 · 冷暖调 · 相近色 · 一段旋律"),
-        ("诊肤色", "正对镜头", "ITA° 肤色角 · 冷暖 · 推荐与避雷色系"),
-        ("查妆容", "涂完再测", "与目标色的 ΔE 偏差 · 补涂建议")]
+        ("诊肤色", "正对镜头", "肤色深浅 · 冷暖 · 3 支推荐色号"),
+        ("查妆容", "涂完再测", "与目标色的 ΔE 偏差 · 补涂建议"),
+        ("试色", "选一支色号", "直接涂在唇形上，可快速换色")]
+cw, cgap = 2.72, 0.24
 x = M
 for i, (name, act, out) in enumerate(caps):
-    box(s, x, 3.0, 3.55, 2.35, PANEL, LINE)
-    text(s, x + 0.34, 3.28, 2.8, 0.4, f"0{i+1}", size=10, color=GOLD)
-    text(s, x + 0.34, 3.6, 2.8, 0.45, name, size=22, color=TEXT, bold=True)
-    text(s, x + 0.34, 4.14, 2.8, 0.3, act, size=10.5, color=DIM)
-    rule(s, x + 0.34, 4.52, 0.5, 0.03, GOLD)
-    text(s, x + 0.34, 4.68, 2.85, 0.6, out, size=10.5, color=GOLD_B, line=1.55)
-    x += 3.72
+    box(s, x, 3.0, cw, 2.35, PANEL, LINE)
+    text(s, x + 0.26, 3.26, cw - 0.4, 0.4, f"0{i+1}", size=10, color=GOLD)
+    text(s, x + 0.26, 3.56, cw - 0.4, 0.45, name, size=20, color=TEXT, bold=True)
+    text(s, x + 0.26, 4.06, cw - 0.4, 0.3, act, size=10, color=DIM)
+    rule(s, x + 0.26, 4.42, 0.5, 0.03, GOLD)
+    text(s, x + 0.26, 4.58, cw - 0.34, 0.6, out, size=10, color=GOLD_B, line=1.55)
+    x += cw + cgap
 
 text(s, M, 5.72, 11.6, 0.5,
      "配套无障碍设计：纯键盘可操作 · 语音与字幕双通道 · 大字 / 高对比模式 · 焦点可见 · 结果区 aria-live",

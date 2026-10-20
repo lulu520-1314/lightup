@@ -62,6 +62,16 @@ await sleep(300);
 const s2 = await snap();
 const focusBack = await page.evaluate(() => document.activeElement?.classList.contains('metric'));
 
+// 放大镜开关
+const loupeVisible = () => page.evaluate(() => !document.getElementById('loupeWrap').hidden);
+const loupeBefore = await loupeVisible();
+await page.click('#btnLoupe');
+await sleep(300);
+const loupeOff = await loupeVisible();
+await page.click('#btnLoupe');
+await sleep(300);
+const loupeBack = await loupeVisible();
+
 // 诊肤色（2 个指标）
 await page.click('#modeSkin');
 await page.keyboard.press('Space');
@@ -114,6 +124,9 @@ const report = {
   '示例照片按钮在最左': s0.srcBtns[0].id === 'srcExample',
   '示例照片为选中态': s0.srcBtns[0].pressed === 'true',
   '读色指标数=3': s0.metricOrder === 3,
+  '放大镜默认显示': loupeBefore === true,
+  '可关闭放大镜': loupeOff === false,
+  '可重新打开': loupeBack === true,
   '点卡片弹出说明': s1.tipHidden === false && !!s1.tipTitle,
   'Esc 可关闭': s2.tipHidden === true,
   '关闭后焦点归位': focusBack === true,
