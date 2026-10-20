@@ -727,16 +727,21 @@ function clearObjectUrl() {
 async function loadImageSource(url, label) {
   stopCamera();
   // 从别的来源切过来时，旧的白参考不再成立，必须重置
-  // （首次启动 source 还是 none，此时保留 localStorage 里恢复的白平衡）
   if (state.source.kind !== 'none') clearWhitePoint({ announce: false });
   setSourceUI('image', label);
   els.pill.textContent = '正在读取图片…';
+
   photo.src = url;
-  try {
-    await photo.decode();
-  } catch (_) {
-    /* 某些浏览器无 decode()，回落到 onload 轮询 */
-  }
+
+  // 等图片真正可用：不依赖 decode()（部分浏览器/移动端会提前 reject）
+  await new Promise((resolve) => {
+    if (photo.complete && photo.naturalWidth) return resolve();
+    const done = () => resolve();
+    photo.addEventListener('load', done, { once: true });
+    photo.addEventListener('error', done, { once: true });
+    setTimeout(done, 5000);
+  });
+
   if (!photo.naturalWidth) {
     els.pill.textContent = '图片读取失败';
     els.pill.classList.remove('ok');
@@ -744,37 +749,44 @@ async function loadImageSource(url, label) {
     return false;
   }
 
-  const ok = await state.engine.setImageMode();
-  if (!ok) {
-    els.pill.textContent = '静态图模式不可用';
-    return false;
-  }
   const w = photo.naturalWidth;
   const h = photo.naturalHeight;
-  const res = state.engine.detectImage(photo);
-
-  if (res) {
-    const geo = buildGeometry(res.landmarks.map((p) => ({ x: p.x * w, y: p.y * h })));
-    state.lastGeometry = geo;
-    // 默认把取色点放到唇部中心：第一眼就是有意义的读数
-    const c = centroid(geo.lipOuter);
-    state.pick = { x: c.x / w, y: c.y / h };
-    els.pill.textContent = `人脸已锁定 · ${state.engine.delegate}`;
-    els.pill.classList.add('ok');
-  } else {
-    state.lastGeometry = null;
-    state.pick = { x: 0.5, y: 0.5 };
-    els.pill.textContent = '图片中未检测到人脸';
-    els.pill.classList.remove('ok');
-  }
-  drawOverlay(state.lastGeometry, w, h);
-  // 取样半径自适应：约画面短边的 1.2%，小目标也能取准
   state.radius = clamp(Math.round(Math.min(w, h) * 0.012), 4, 24);
+
+  // 先把图显示出来：这一步与"人脸模型是否就绪"无关
+  state.lastGeometry = null;
+  state.pick = { x: 0.5, y: 0.5 };
+  drawOverlay(null, w, h);
   drawLoupe();
   els.hint.textContent = window.matchMedia('(pointer: coarse)').matches
     ? '点一下画面取色；双指缩放取样大小'
     : '点击画面取色；滚轮调取样大小，放大图内可微调';
 
+  // 再尝试人脸检测；模型不可用时仍然保留读色能力
+  const imageModeReady = await state.engine.setImageMode();
+  if (!imageModeReady) {
+    els.pill.textContent = '仅读色（人脸模型未就绪）';
+    els.pill.classList.remove('ok');
+    if (state.mode === 'object') readNow();
+    return true;
+  }
+
+  const res = state.engine.detectImage(photo);
+  if (res) {
+    const geo = buildGeometry(res.landmarks.map((p) => ({ x: p.x * w, y: p.y * h })));
+    state.lastGeometry = geo;
+    const c = centroid(geo.lipOuter);
+    state.pick = { x: c.x / w, y: c.y / h };
+    els.pill.textContent = `人脸已锁定 · ${state.engine.delegate}`;
+    els.pill.classList.add('ok');
+    drawOverlay(geo, w, h);
+  } else {
+    els.pill.textContent = '图片中未检测到人脸';
+    els.pill.classList.remove('ok');
+    drawOverlay(null, w, h);
+  }
+
+  drawLoupe();
   if (state.mode === 'object') readNow();
   return true;
 }
