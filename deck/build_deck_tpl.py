@@ -170,7 +170,7 @@ for sh in s1.shapes:
         tf = sh.text_frame
         set_para(tf.paragraphs[0], "听见颜色", 44, RGBColor(0xFF, 0xFF, 0xFF), True)
         p2 = tf.paragraphs[1]
-        set_para(p2, "LightUp 光引 · 无界体验家（主题二）· 队伍：__________",
+        set_para(p2, "LightUp 光引 · 无界体验家（主题二）· 队伍：翰林仕",
                  20, RGBColor(0xFF, 0xFF, 0xFF), False)
         p2.line_spacing = 1.2
     elif sh.name == "矩形 28":         # 模版说明文字 → 一句话定位
