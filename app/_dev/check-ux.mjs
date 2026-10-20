@@ -42,7 +42,6 @@ const snap = () => page.evaluate(() => {
     tipHidden: document.getElementById('tip').hidden,
     tipTitle: document.getElementById('tipTitle').textContent,
     mutePressed: document.getElementById('btnMute').getAttribute('aria-pressed'),
-    voiceLabel: document.getElementById('btnVoice').textContent.trim(),
     rateText: document.getElementById('btnRate').textContent,
   };
 });
@@ -134,7 +133,6 @@ const report = {
   '查妆容指标数=2': s4.metricOrder === 2,
   '关闭播报后状态一致': s5.mutePressed === 'false',
   'T 可调语速': s6.rateText !== s5.rateText,
-  '有音色开关': /音色/.test(s5.voiceLabel),
   '白平衡校准生效': !!wbAfterCal,
   '切来源后白平衡重置': wbAfterSwitch === null,
   '无控制台错误': errors.length === 0,

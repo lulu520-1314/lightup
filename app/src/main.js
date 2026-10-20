@@ -16,7 +16,7 @@ import { SHADES, TONE_ADVICE, matchPhrase } from './shades.js';
 import { sonifyColor, earcon, setMuted } from './audio.js';
 import {
   speak, speakUI, setSpeechEnabled, primeSpeech, stopSpeaking, setSpeechRate,
-  initVoices, setVoiceGender, setUIEnabled,
+  initVoices, setUIEnabled,
 } from './speech.js';
 import { FaceEngine, buildGeometry, shrinkPolygon, centroid } from './vision.js';
 
@@ -58,7 +58,6 @@ const els = {
   calibBanner: $('calibBanner'),
   btnMute: $('btnMute'),
   btnRate: $('btnRate'),
-  btnVoice: $('btnVoice'),
   btnUI: $('btnUI'),
   btnLoupe: $('btnLoupe'),
   loupeClose: $('loupeClose'),
@@ -112,7 +111,6 @@ const state = {
   broadcast: true,                             // 播报总开关
   uiSpeech: true,                              // 操作类播报（按钮/切换提示）
   loupeOn: true,                               // 右下角放大镜是否显示
-  voiceGender: 'female',                       // 音色：female | male
 };
 
 /* ================= 取帧画布 ================= */
@@ -773,7 +771,9 @@ async function loadImageSource(url, label) {
   // 取样半径自适应：约画面短边的 1.2%，小目标也能取准
   state.radius = clamp(Math.round(Math.min(w, h) * 0.012), 4, 24);
   drawLoupe();
-  els.hint.textContent = '点击画面取色；滚轮调取样大小，放大图内可微调';
+  els.hint.textContent = window.matchMedia('(pointer: coarse)').matches
+    ? '点一下画面取色；双指缩放取样大小'
+    : '点击画面取色；滚轮调取样大小，放大图内可微调';
 
   if (state.mode === 'object') readNow();
   return true;
@@ -1138,18 +1138,6 @@ function cycleRate() {
   }
 }
 
-function toggleVoice() {
-  const g = state.voiceGender === 'female' ? 'male' : 'female';
-  state.voiceGender = g;
-  setVoiceGender(g);
-  els.btnVoice.textContent = `音色 ${g === 'female' ? '女声' : '男声'}`;
-  try { localStorage.setItem('lightup.voice', g); } catch (_) { /* ignore */ }
-  if (state.broadcast) {
-    primeSpeech();
-    speakUI(g === 'male' ? '男声。' : '女声。');
-  }
-}
-
 els.btnMute.addEventListener('click', () => {
   setBroadcast(!state.broadcast);
   if (state.broadcast) {
@@ -1158,7 +1146,6 @@ els.btnMute.addEventListener('click', () => {
   }
 });
 els.btnRate.addEventListener('click', cycleRate);
-els.btnVoice.addEventListener('click', toggleVoice);
 
 function setLoupe(on, announce = true) {
   state.loupeOn = on;
@@ -1647,7 +1634,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '4') setMode('tryon');
   if (e.key === 'r' || e.key === 'R') els.replay.click();
   if (e.key === 'b' || e.key === 'B') els.bigText.click();
-  if (e.key === 'y' || e.key === 'Y') els.btnVoice.click();
   if (e.key === 'c' || e.key === 'C') els.contrast.click();
   if (e.key === 'u' || e.key === 'U') els.fileInput.click();
   if (e.key === 'l' || e.key === 'L') els.btnLibrary.click();
@@ -1700,14 +1686,6 @@ async function boot() {
   setMode('object');
   initVoices();
   try {
-    const vg = localStorage.getItem('lightup.voice');
-    if (vg === 'male' || vg === 'female') {
-      state.voiceGender = vg;
-      setVoiceGender(vg);
-      els.btnVoice.textContent = `音色 ${vg === 'male' ? '男声' : '女声'}`;
-    }
-  } catch (_) { /* ignore */ }
-  try {
     if (localStorage.getItem('lightup.uiSpeech') === '0') {
       state.uiSpeech = false;
       setUIEnabled(false);
@@ -1716,7 +1694,12 @@ async function boot() {
     }
   } catch (_) { /* ignore */ }
   try {
-    if (localStorage.getItem('lightup.loupe') === '0') {
+    const savedLoupe = localStorage.getItem('lightup.loupe');
+    if (savedLoupe === '0') {
+      state.loupeOn = false;
+      els.btnLoupe.setAttribute('aria-pressed', 'false');
+    } else if (savedLoupe === null && window.innerWidth < 620) {
+      // 手机上放大镜会挡住画面，默认收起（用户仍可手动打开）
       state.loupeOn = false;
       els.btnLoupe.setAttribute('aria-pressed', 'false');
     }

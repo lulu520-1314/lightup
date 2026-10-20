@@ -10,7 +10,6 @@
 
 let enabled = true;
 let rate = 1.05;
-let gender = 'female';          // 'female' | 'male'
 let uiEnabled = true;           // 操作类播报（按钮、切换、提示）开关
 let voiceCache = [];
 
@@ -40,9 +39,6 @@ export function speakUI(text) {
   speak(text);
 }
 
-/* ---------- 音色：男声 / 女声 ---------- */
-const MALE_HINT = /(kangkang|yunxi|yunyang|yunjian|yunze|yuppy|male|男)/i;
-const FEMALE_HINT = /(huihui|xiaoxiao|xiaoyi|yaoyao|xiaomo|female|女)/i;
 
 /** 浏览器语音列表是异步加载的，必须监听 onvoiceschanged */
 export function initVoices() {
@@ -54,34 +50,15 @@ export function initVoices() {
 
 const NATURAL_HINT = /(natural|online|neural|premium)/i;
 
-export function setVoiceGender(g) {
-  gender = g === 'male' ? 'male' : 'female';
-}
-
-export function getVoiceGender() {
-  return gender;
-}
-
-/** 挑一个中文音色；挑不到就靠 pitch 区分（男低女高） */
+/** 优先挑自然音色（Natural / Online），机械音明显更难听 */
 function pickVoice() {
-  // 语音列表可能晚于首次调用才就绪，这里再取一次
   if (!voiceCache.length && 'speechSynthesis' in window) {
     voiceCache = window.speechSynthesis.getVoices() || [];
   }
   if (!voiceCache.length) return null;
-
   const zh = voiceCache.filter((v) => /^zh|chinese/i.test(`${v.lang} ${v.name}`));
   const pool = zh.length ? zh : voiceCache;
-  const want = gender === 'male' ? MALE_HINT : FEMALE_HINT;
-  const avoid = gender === 'male' ? FEMALE_HINT : MALE_HINT;
-
-  // 优先级：性别匹配且是自然音色 → 性别匹配 → 自然音色 → 排除反性别 → 兜底
-  return pool.find((v) => want.test(v.name) && NATURAL_HINT.test(v.name))
-      || pool.find((v) => want.test(v.name))
-      || pool.find((v) => NATURAL_HINT.test(v.name) && !avoid.test(v.name))
-      || pool.find((v) => !avoid.test(v.name))
-      || pool[0]
-      || null;
+  return pool.find((v) => NATURAL_HINT.test(v.name)) || pool[0] || null;
 }
 
 export function stopSpeaking() {
@@ -104,7 +81,7 @@ export function speak(text, { interrupt = true, priority = false } = {}) {
     const u = new SpeechSynthesisUtterance(chunk);
     u.lang = 'zh-CN';
     u.rate = rate;
-    u.pitch = gender === 'male' ? 0.7 : 1.12;
+    u.pitch = 1.05;
     u.volume = 1.0;
     const v = pickVoice();
     if (v) u.voice = v;

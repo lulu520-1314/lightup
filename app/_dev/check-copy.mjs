@@ -56,7 +56,7 @@ const report = {
   '底栏 R 只出现一次': copy.footerRCount === 1,
   '底栏覆盖 L 色卡库': copy.footer.includes('L'),
   '底栏覆盖 M 播报': copy.footer.includes('M'),
-  '播报组含总开关/操作/语速/音色': ['开', '操作', '语速', '音色'].every((k) => copy.audioButtons.some((b) => b.includes(k))),
+  '播报组含总开关/操作/语速': ['开', '操作', '语速'].every((k) => copy.audioButtons.some((b) => b.includes(k))),
   '不再有独立的语音子开关': !copy.audioButtons.some((b) => b.trim() === '语音'),
   '右侧只有显示类开关': !/播报|语音/.test(copy.actionsText),
 };
